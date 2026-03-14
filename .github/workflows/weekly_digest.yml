@@ -1,0 +1,133 @@
+name: Oncology Digest
+
+on:
+  # ── Scheduled runs ──────────────────────────────────────────────────────────
+  # Runs every Monday and Thursday at 07:00 UTC.
+  #   Monday   covers Thu–Sun (4 days back, articles ≥1 day old)
+  #   Thursday covers Mon–Wed (3 days back, articles ≥1 day old)
+  # Articles published on the same day as the digest are always excluded
+  # (upper bound = start of today) to prevent duplicates or missed articles.
+  schedule:
+    - cron: "0 7 * * 1"   # Monday   07:00 UTC
+    - cron: "0 7 * * 4"   # Thursday 07:00 UTC
+
+  # ── Manual trigger ──────────────────────────────────────────────────────────
+  # Lets you run from the GitHub Actions tab at any time with custom settings.
+  # Go to: Actions → Weekly Oncology Digest → Run workflow
+  workflow_dispatch:
+    inputs:
+
+      days:
+        # ── DATE WINDOW ───────────────────────────────────────────────────────
+        # How many days back to look for articles.
+        # Leave blank to auto-compute from the weekday (Monday=4, Thursday=3).
+        # Override when catching up after a missed run (e.g. set to 7).
+        description: "Days back to search PubMed (leave blank for auto)"
+        required: false
+        default: ""
+
+      rss_url:
+        # ── RSS FEED URL OVERRIDE ─────────────────────────────────────────────
+        # Paste a PubMed RSS URL here to use it for THIS RUN ONLY.
+        # Leave blank to use the URL(s) configured in queries.py (the normal default).
+        #
+        # How to get a PubMed RSS URL:
+        #   1. Run your search at https://pubmed.ncbi.nlm.nih.gov/
+        #   2. Click "Create RSS" below the result count
+        #   3. Set items to 100, click "Create RSS", copy the URL
+        #
+        # Example:
+        #   https://pubmed.ncbi.nlm.nih.gov/rss/search/<id>/?limit=100
+        description: "RSS feed URL override (leave blank to use queries.py)"
+        required: false
+        default: ""
+
+      dry_run:
+        # ── DRY RUN ───────────────────────────────────────────────────────────
+        # Set to true to fetch and process articles WITHOUT sending the email.
+        # Useful for testing or previewing a new RSS feed.
+        # The HTML preview and classification report are still uploaded as artifacts.
+        description: "Dry run — skip sending the email"
+        type: boolean
+        required: false
+        default: false
+
+
+jobs:
+  send-digest:
+    name: Generate and send digest
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run digest
+        env:
+          GEMINI_API_KEY:     ${{ secrets.GEMINI_API_KEY }}
+          PUBMED_API_KEY:     ${{ secrets.PUBMED_API_KEY }}
+          SMTP_USER:          ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD:      ${{ secrets.SMTP_PASSWORD }}
+          SENDER_EMAIL:       ${{ secrets.SENDER_EMAIL }}
+          RECIPIENT_EMAILS:   ${{ secrets.RECIPIENT_EMAILS }}
+          DIGEST_TITLE:       ${{ vars.DIGEST_TITLE }}
+        run: |
+          # Auto-compute days from weekday: Monday (1) → 4, Thursday (4) → 3
+          DOW=$(date +%u)
+          if [ "$DOW" = "1" ]; then
+            AUTO_DAYS=4
+          else
+            AUTO_DAYS=3
+          fi
+          INPUT_DAYS="${{ github.event.inputs.days }}"
+          DAYS="${INPUT_DAYS:-$AUTO_DAYS}"
+
+          DRY="${{ github.event.inputs.dry_run || 'false' }}"
+          RSS="${{ github.event.inputs.rss_url || '' }}"
+
+          ARGS="--days $DAYS --save-html digest_preview.html"
+
+          # Append RSS URL override if one was provided in the manual trigger form
+          if [ -n "$RSS" ]; then
+            ARGS="$ARGS --rss-url $RSS"
+          fi
+
+          # Append --dry-run flag if requested
+          if [ "$DRY" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+
+          python main.py $ARGS
+
+      # ── Upload artifacts ───────────────────────────────────────────────────
+      # Both files are always uploaded so you can inspect them after every run.
+      # Find them at: Actions → (select the run) → scroll to Artifacts section
+      #
+      #   digest-preview          — the full HTML email as sent (or as it would have been)
+      #   classification-report   — every article with included/excluded status and reason
+
+      - name: Upload digest preview
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-preview
+          path: digest_preview.html
+          retention-days: 14
+
+      - name: Upload classification report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: classification-report
+          path: classification_report.html
+          retention-days: 14

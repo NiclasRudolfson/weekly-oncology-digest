@@ -1,0 +1,23 @@
+# Secrets — never commit
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Local preview / output HTML (generated artefacts)
+*_preview.html
+*_report.html
+trial_output.html
+
+# Claude Code session data
+.claude/
+
+# macOS
+.DS_Store
