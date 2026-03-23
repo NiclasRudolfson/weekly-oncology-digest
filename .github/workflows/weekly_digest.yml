@@ -2,14 +2,14 @@ name: Oncology Digest
 
 on:
   # ── Scheduled runs ──────────────────────────────────────────────────────────
-  # Runs every Monday and Thursday at 07:00 UTC.
-  #   Monday   covers Thu–Sun (4 days back, articles ≥1 day old)
-  #   Thursday covers Mon–Wed (3 days back, articles ≥1 day old)
+  # Runs every Monday at 05:30 UTC.
+  #   05:30 UTC = 07:30 Stockholm summer time (CEST, UTC+2)
+  #             = 06:30 Stockholm winter time (CET,  UTC+1)
+  # Covers the past 7 days of articles.
   # Articles published on the same day as the digest are always excluded
   # (upper bound = start of today) to prevent duplicates or missed articles.
   schedule:
-    - cron: "0 7 * * 1"   # Monday   07:00 UTC
-    - cron: "0 7 * * 4"   # Thursday 07:00 UTC
+    - cron: "30 5 * * 1"  # Monday   05:30 UTC (07:30 Stockholm CEST)
 
   # ── Manual trigger ──────────────────────────────────────────────────────────
   # Lets you run from the GitHub Actions tab at any time with custom settings.
@@ -82,13 +82,8 @@ jobs:
           RECIPIENT_EMAILS:   ${{ secrets.RECIPIENT_EMAILS }}
           DIGEST_TITLE:       ${{ vars.DIGEST_TITLE }}
         run: |
-          # Auto-compute days from weekday: Monday (1) → 4, Thursday (4) → 3
-          DOW=$(date +%u)
-          if [ "$DOW" = "1" ]; then
-            AUTO_DAYS=4
-          else
-            AUTO_DAYS=3
-          fi
+          # Weekly on Monday — always look back 7 days
+          AUTO_DAYS=7
           INPUT_DAYS="${{ github.event.inputs.days }}"
           DAYS="${INPUT_DAYS:-$AUTO_DAYS}"
 

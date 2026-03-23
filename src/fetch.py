@@ -19,6 +19,23 @@ from email.utils import parsedate_to_datetime
 from typing import Optional
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+
+def _requests_session() -> requests.Session:
+    """Return a session with automatic retries on transient server errors."""
+    session = requests.Session()
+    retry = Retry(
+        total=4,
+        backoff_factor=2,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["GET"],
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    return session
 
 import config
 from queries import RSS_URLS
@@ -29,7 +46,7 @@ from queries import RSS_URLS
 def _fetch_rss(url: str, cutoff: datetime, end_cutoff: datetime) -> list[str]:
     """Fetch a PubMed RSS feed and return PMIDs published on or after cutoff
     and strictly before end_cutoff (i.e. not today)."""
-    resp = requests.get(url, timeout=30)
+    resp = _requests_session().get(url, timeout=30)
     resp.raise_for_status()
     root = ET.fromstring(resp.text)
     pmids = []
@@ -65,7 +82,7 @@ def _efetch(pmids: list[str]) -> str:
     if config.PUBMED_API_KEY:
         params["api_key"] = config.PUBMED_API_KEY
     url = f"{config.PUBMED_BASE_URL}/efetch.fcgi"
-    resp = requests.get(url, params=params, timeout=30)
+    resp = _requests_session().get(url, params=params, timeout=30)
     resp.raise_for_status()
     return resp.text
 
