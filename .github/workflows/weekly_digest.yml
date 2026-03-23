@@ -17,15 +17,6 @@ on:
   workflow_dispatch:
     inputs:
 
-      days:
-        # ── DATE WINDOW ───────────────────────────────────────────────────────
-        # How many days back to look for articles.
-        # Leave blank to auto-compute from the weekday (Monday=4, Thursday=3).
-        # Override when catching up after a missed run (e.g. set to 7).
-        description: "Days back to search PubMed (leave blank for auto)"
-        required: false
-        default: ""
-
       rss_url:
         # ── RSS FEED URL OVERRIDE ─────────────────────────────────────────────
         # Paste a PubMed RSS URL here to use it for THIS RUN ONLY.
@@ -84,27 +75,29 @@ jobs:
           RECIPIENT_EMAILS:   ${{ secrets.RECIPIENT_EMAILS }}
           DIGEST_TITLE:       ${{ vars.DIGEST_TITLE }}
         run: |
-          # Weekly on Monday — always look back 7 days
-          AUTO_DAYS=7
-          INPUT_DAYS="${{ github.event.inputs.days }}"
-          DAYS="${INPUT_DAYS:-$AUTO_DAYS}"
-
           DRY="${{ github.event.inputs.dry_run || 'false' }}"
           RSS="${{ github.event.inputs.rss_url || '' }}"
 
-          ARGS="--days $DAYS --save-html digest_preview.html"
+          ARGS="--save-html digest_preview.html"
 
-          # Append RSS URL override if one was provided in the manual trigger form
           if [ -n "$RSS" ]; then
             ARGS="$ARGS --rss-url $RSS"
           fi
 
-          # Append --dry-run flag if requested
           if [ "$DRY" = "true" ]; then
             ARGS="$ARGS --dry-run"
           fi
 
           python main.py $ARGS
+
+      - name: Commit updated seen_pmids.txt
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add seen_pmids.txt
+          git diff --staged --quiet || git commit -m "chore: update seen_pmids [skip ci]"
+          git push
 
       # ── Upload artifacts ───────────────────────────────────────────────────
       # Both files are always uploaded so you can inspect them after every run.

@@ -2,9 +2,10 @@
 Fetch articles from PubMed using RSS feeds + E-utilities efetch.
 
 Flow:
-  1. RSS feed  → list of PMIDs + publication dates (filtered to date window)
-  2. efetch    → full XML records (including complete abstracts) for those PMIDs
-  3. parse     → list of article dicts
+  1. RSS feed  → list of PMIDs (all items in feed, no date filtering)
+  2. Deduplicate against seen_pmids → only new PMIDs proceed
+  3. efetch    → full XML records (including complete abstracts) for those PMIDs
+  4. parse     → list of article dicts
 
 Rate limits (efetch only):
   - Without API key: 3 requests/sec
@@ -14,7 +15,6 @@ Rate limits (efetch only):
 
 import time
 import xml.etree.ElementTree as ET
-from datetime import datetime, timedelta
 from email.utils import parsedate_to_datetime
 from typing import Optional
 
@@ -43,26 +43,13 @@ from queries import RSS_URLS
 
 # ── RSS parsing ───────────────────────────────────────────────────────────────
 
-def _fetch_rss(url: str, cutoff: datetime, end_cutoff: datetime) -> list[str]:
-    """Fetch a PubMed RSS feed and return PMIDs published on or after cutoff
-    and strictly before end_cutoff (i.e. not today)."""
+def _fetch_rss(url: str) -> list[str]:
+    """Fetch a PubMed RSS feed and return all PMIDs present in the feed."""
     resp = _requests_session().get(url, timeout=30)
     resp.raise_for_status()
     root = ET.fromstring(resp.text)
     pmids = []
     for item in root.findall(".//item"):
-        # pubDate format: "Mon, 09 Mar 2026 00:00:00 +0000"
-        pub_date_str = item.findtext("pubDate", "")
-        try:
-            pub_date = parsedate_to_datetime(pub_date_str).replace(tzinfo=None)
-        except Exception:
-            pub_date = None
-
-        if pub_date is not None and pub_date < cutoff:
-            continue  # older than the date window
-        if pub_date is not None and pub_date >= end_cutoff:
-            continue  # published today — will appear in the next digest
-
         link = item.findtext("link", "") or item.findtext("guid", "")
         # PubMed links end in /<pmid>/ (may include ?utm_* query params)
         pmid = link.split("?")[0].rstrip("/").split("/")[-1]
@@ -178,34 +165,39 @@ def _parse_xml(xml_text: str) -> list[dict]:
 
 # ── Public interface ──────────────────────────────────────────────────────────
 
-def fetch_articles(rss_urls: list[str] = None, days: int = None) -> list[dict]:
+def fetch_articles(
+    rss_urls: list[str] = None,
+    seen_pmids: set[str] = None,
+) -> tuple[list[dict], set[str]]:
     """
-    Fetch articles from PubMed RSS feeds over the past `days` days.
+    Fetch articles from PubMed RSS feeds, skipping any PMID in seen_pmids.
+
     Deduplicates by PMID across feeds, then retrieves full records via efetch.
 
-    The upper bound is always the start of today (midnight UTC), so articles
-    published today are never included — this prevents duplicates when the
-    digest runs twice a week (e.g. Monday and Thursday).
+    Returns:
+        (articles, new_pmids) where new_pmids is the full set of PMIDs fetched
+        from the feed that were not in seen_pmids (regardless of parse success),
+        so the caller can mark them all as seen.
     """
     rss_urls = rss_urls or RSS_URLS
-    days = days or config.DATE_RANGE_DAYS
-    cutoff = datetime.now() - timedelta(days=days)
-    # Exclude articles published today so each article appears in exactly one digest.
-    today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    seen_pmids = seen_pmids or set()
 
     all_pmids: set[str] = set()
     for url in rss_urls:
         print(f"  RSS: {url[:80]}")
-        pmids = _fetch_rss(url, cutoff, today_start)
-        print(f"    → {len(pmids)} articles within date window")
+        pmids = _fetch_rss(url)
+        print(f"    → {len(pmids)} articles in feed")
         all_pmids.update(pmids)
 
-    print(f"  Total unique PMIDs: {len(all_pmids)}")
-    if not all_pmids:
-        return []
+    new_pmids = all_pmids - seen_pmids
+    print(f"  Total unique PMIDs in feed: {len(all_pmids)}")
+    print(f"  New (not yet seen):         {len(new_pmids)}")
+
+    if not new_pmids:
+        return [], set()
 
     # Fetch full records (including abstracts) in batches of 100
-    pmid_list = list(all_pmids)
+    pmid_list = list(new_pmids)
     articles = []
     for i in range(0, len(pmid_list), 100):
         batch = pmid_list[i : i + 100]
@@ -215,4 +207,4 @@ def fetch_articles(rss_urls: list[str] = None, days: int = None) -> list[dict]:
             time.sleep(0.4)
 
     print(f"  Successfully parsed {len(articles)} articles")
-    return articles
+    return articles, new_pmids

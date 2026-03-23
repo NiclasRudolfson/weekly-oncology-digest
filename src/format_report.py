@@ -37,7 +37,7 @@ EXC_TEXT   = "#555555"
 EXC_BORDER = "#bdc3c7"
 
 
-def render_report(classified: list[dict], days: int, rss_urls: list[str]) -> str:
+def render_report(classified: list[dict], rss_urls: list[str]) -> str:
     """
     Render an HTML classification report.
 
@@ -45,7 +45,6 @@ def render_report(classified: list[dict], days: int, rss_urls: list[str]) -> str
         classified:  All article dicts from summarize.classify_articles(),
                      each carrying 'status', 'reason', 'title', 'pmid',
                      'pubmed_url', 'journal', and 'pub_date' fields.
-        days:        The date window used for this run.
         rss_urls:    The RSS feed URL(s) used for this run.
 
     Returns:
@@ -194,7 +193,7 @@ def render_report(classified: list[dict], days: int, rss_urls: list[str]) -> str
     </div>
 
     <div style="font-size:13px;color:{MUTED};margin-bottom:6px;">
-      <strong style="color:{TEXT};">Date window:</strong> past {days} days
+      <strong style="color:{TEXT};">Deduplication:</strong> PMID-based (new since last run)
     </div>
     <div style="font-size:13px;color:{MUTED};margin-bottom:4px;">
       <strong style="color:{TEXT};">RSS feeds:</strong>
