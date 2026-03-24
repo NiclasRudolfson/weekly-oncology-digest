@@ -77,13 +77,6 @@ jobs:
           # - digest_id: haematology
           #   recipient_secret: HAEMATOLOGY_RECIPIENTS
 
-    # Skip jobs that don't match the manually selected digest
-    # (when digest input is blank, all jobs run)
-    if: >
-      github.event_name == 'schedule' ||
-      github.event.inputs.digest == '' ||
-      github.event.inputs.digest == matrix.digest_id
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -97,7 +90,22 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      # Decide whether this matrix job should actually run.
+      # When a digest is selected manually, skip all other jobs.
+      # When no digest is selected (scheduled or blank input), run all jobs.
+      - name: Check if this digest should run
+        id: should_run
+        run: |
+          INPUT="${{ github.event.inputs.digest }}"
+          if [ -z "$INPUT" ] || [ "$INPUT" = "${{ matrix.digest_id }}" ]; then
+            echo "result=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Skipping '${{ matrix.digest_id }}' — workflow requested '$INPUT'"
+            echo "result=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Run digest
+        if: steps.should_run.outputs.result == 'true'
         env:
           GEMINI_API_KEY:   ${{ secrets.GEMINI_API_KEY }}
           PUBMED_API_KEY:   ${{ secrets.PUBMED_API_KEY }}
@@ -124,7 +132,7 @@ jobs:
           python main.py $ARGS
 
       - name: Commit updated seen_pmids
-        if: ${{ github.event.inputs.dry_run != 'true' }}
+        if: steps.should_run.outputs.result == 'true' && github.event.inputs.dry_run != 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -143,7 +151,7 @@ jobs:
       #   classification-report-{id}   — every article with its AI decision and reason
 
       - name: Upload digest preview
-        if: always()
+        if: always() && steps.should_run.outputs.result == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: digest-preview-${{ matrix.digest_id }}
@@ -151,7 +159,7 @@ jobs:
           retention-days: 14
 
       - name: Upload classification report
-        if: always()
+        if: always() && steps.should_run.outputs.result == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: classification-report-${{ matrix.digest_id }}
