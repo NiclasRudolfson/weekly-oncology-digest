@@ -1,4 +1,4 @@
-name: Oncology Digest
+name: Weekly Digests
 
 on:
   # ── Scheduled runs ──────────────────────────────────────────────────────────
@@ -6,37 +6,42 @@ on:
   #   05:30 UTC = 07:30 Stockholm summer time (CEST, UTC+2)
   #             = 06:30 Stockholm winter time (CET,  UTC+1)
   # Covers the past 7 days of articles.
-  # Articles published on the same day as the digest are always excluded
-  # (upper bound = start of today) to prevent duplicates or missed articles.
   schedule:
-    - cron: "30 5 * * 1"  # Monday   05:30 UTC (07:30 Stockholm CEST)
+    - cron: "30 5 * * 1"  # Monday 05:30 UTC
 
   # ── Manual trigger ──────────────────────────────────────────────────────────
   # Lets you run from the GitHub Actions tab at any time with custom settings.
-  # Go to: Actions → Weekly Oncology Digest → Run workflow
+  # Go to: Actions → Weekly Digests → Run workflow
   workflow_dispatch:
     inputs:
+
+      digest:
+        # ── SELECT DIGEST ─────────────────────────────────────────────────────
+        # Which digest to run. Leave blank to run ALL digests (same as scheduled).
+        # Must match the "id" field in the corresponding digests/*.toml file.
+        # Example: oncology
+        description: "Digest to run (leave blank to run all)"
+        required: false
+        default: ""
 
       rss_url:
         # ── RSS FEED URL OVERRIDE ─────────────────────────────────────────────
         # Paste a PubMed RSS URL here to use it for THIS RUN ONLY.
-        # Leave blank to use the URL(s) configured in queries.py (the normal default).
+        # Leave blank to use the URL(s) in the digest's .toml config file.
+        # Only applies when a specific digest is selected above.
         #
         # How to get a PubMed RSS URL:
         #   1. Run your search at https://pubmed.ncbi.nlm.nih.gov/
         #   2. Click "Create RSS" below the result count
         #   3. Set items to 100, click "Create RSS", copy the URL
-        #
-        # Example:
-        #   https://pubmed.ncbi.nlm.nih.gov/rss/search/<id>/?limit=100
-        description: "RSS feed URL override (leave blank to use queries.py)"
+        description: "RSS feed URL override (leave blank to use config)"
         required: false
         default: ""
 
       dry_run:
         # ── DRY RUN ───────────────────────────────────────────────────────────
         # Set to true to fetch and process articles WITHOUT sending the email.
-        # Useful for testing or previewing a new RSS feed.
+        # Useful for testing or previewing a new feed or config change.
         # The HTML preview and classification report are still uploaded as artifacts.
         description: "Dry run — skip sending the email"
         type: boolean
@@ -46,11 +51,38 @@ on:
 
 jobs:
   send-digest:
-    name: Generate and send digest
+    name: "Digest: ${{ matrix.digest_id }}"
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    strategy:
+      # If one digest fails, keep running the others
+      fail-fast: false
+      matrix:
+        # ── ADD NEW DIGESTS HERE ───────────────────────────────────────────────
+        # Each entry runs as a separate parallel job.
+        #
+        # digest_id       — must match the "id" field in digests/{digest_id}.toml
+        # recipient_secret — name of the GitHub secret holding recipient emails
+        #
+        # To add a new digest:
+        #   1. Create digests/{digest_id}.toml with the config
+        #   2. Add the GitHub secret for recipients (Settings → Secrets → Actions)
+        #   3. Uncomment or add a new entry below
+        include:
+          - digest_id: general_oncology
+            recipient_secret: RECIPIENT_EMAILS
+          # - digest_id: haematology
+          #   recipient_secret: HAEMATOLOGY_RECIPIENTS
+
+    # Skip jobs that don't match the manually selected digest
+    # (when digest input is blank, all jobs run)
+    if: >
+      github.event_name == 'schedule' ||
+      github.event.inputs.digest == '' ||
+      github.event.inputs.digest == matrix.digest_id
 
     steps:
       - name: Checkout repository
@@ -67,18 +99,19 @@ jobs:
 
       - name: Run digest
         env:
-          GEMINI_API_KEY:     ${{ secrets.GEMINI_API_KEY }}
-          PUBMED_API_KEY:     ${{ secrets.PUBMED_API_KEY }}
-          SMTP_USER:          ${{ secrets.SMTP_USER }}
-          SMTP_PASSWORD:      ${{ secrets.SMTP_PASSWORD }}
-          SENDER_EMAIL:       ${{ secrets.SENDER_EMAIL }}
-          RECIPIENT_EMAILS:   ${{ secrets.RECIPIENT_EMAILS }}
-          DIGEST_TITLE:       ${{ vars.DIGEST_TITLE }}
+          GEMINI_API_KEY:   ${{ secrets.GEMINI_API_KEY }}
+          PUBMED_API_KEY:   ${{ secrets.PUBMED_API_KEY }}
+          SMTP_USER:        ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD:    ${{ secrets.SMTP_PASSWORD }}
+          SENDER_EMAIL:     ${{ secrets.SENDER_EMAIL }}
+          # Inject the digest-specific recipient secret under its configured name.
+          # The digest config file specifies which env var name to look up.
+          ${{ matrix.recipient_secret }}: ${{ secrets[matrix.recipient_secret] }}
         run: |
           DRY="${{ github.event.inputs.dry_run || 'false' }}"
           RSS="${{ github.event.inputs.rss_url || '' }}"
 
-          ARGS="--save-html digest_preview.html"
+          ARGS="--digest ${{ matrix.digest_id }} --save-html digest_preview_${{ matrix.digest_id }}.html"
 
           if [ -n "$RSS" ]; then
             ARGS="$ARGS --rss-url $RSS"
@@ -90,35 +123,37 @@ jobs:
 
           python main.py $ARGS
 
-      - name: Commit updated seen_pmids.txt
+      - name: Commit updated seen_pmids
         if: ${{ github.event.inputs.dry_run != 'true' }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add seen_pmids.txt
-          git diff --staged --quiet || git commit -m "chore: update seen_pmids [skip ci]"
-          git push
+          git add seen_pmids_${{ matrix.digest_id }}.txt
+          git diff --staged --quiet || (
+            git pull --rebase origin ${{ github.ref_name }} &&
+            git commit -m "chore: update seen_pmids (${{ matrix.digest_id }}) [skip ci]" &&
+            git push
+          )
 
       # ── Upload artifacts ───────────────────────────────────────────────────
       # Both files are always uploaded so you can inspect them after every run.
       # Find them at: Actions → (select the run) → scroll to Artifacts section
       #
-      #   digest-preview          — the full HTML email as sent (or as it would have been)
-      #   classification-report   — every article with included/excluded status and reason
+      #   digest-preview-{id}          — the full HTML email (as sent, or preview)
+      #   classification-report-{id}   — every article with its AI decision and reason
 
       - name: Upload digest preview
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: digest-preview
-          path: digest_preview.html
+          name: digest-preview-${{ matrix.digest_id }}
+          path: digest_preview_${{ matrix.digest_id }}.html
           retention-days: 14
 
       - name: Upload classification report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: classification-report
+          name: classification-report-${{ matrix.digest_id }}
           path: classification_report.html
           retention-days: 14
-

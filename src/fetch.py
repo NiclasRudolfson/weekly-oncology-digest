@@ -38,7 +38,6 @@ def _requests_session() -> requests.Session:
     return session
 
 import config
-from queries import RSS_URLS
 
 
 # ── RSS parsing ───────────────────────────────────────────────────────────────
@@ -179,7 +178,7 @@ def fetch_articles(
         from the feed that were not in seen_pmids (regardless of parse success),
         so the caller can mark them all as seen.
     """
-    rss_urls = rss_urls or RSS_URLS
+    rss_urls = rss_urls or []
     seen_pmids = seen_pmids or set()
 
     all_pmids: set[str] = set()
