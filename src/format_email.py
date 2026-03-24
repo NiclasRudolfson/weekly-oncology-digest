@@ -6,12 +6,11 @@ All CSS is inline — required for reliable rendering across email clients
 
 Layout:
   - Pure white page background; each section is its own warm-cream card.
-  - 12 fixed oncology sections (amber serif heading), ordered:
-      General Oncology → subspecialties A–Z → Methodological Issues
+  - Sections are passed in from the digest config (ordered list).
   - All major-interest articles rendered with:
       serif title (15 px) → meta line → summary paragraph
-  - A final "Also published in the past week" card lists minor-interest articles
-    as plain one-liners: Journal — Title — PMID (no extraction required).
+  - Minor-interest articles follow as plain one-liners within each section:
+      Journal — Title — PMID (no extraction required).
 """
 
 from datetime import datetime, timedelta
@@ -30,22 +29,6 @@ SERIF = "Georgia, 'Times New Roman', serif"
 SANS  = ("-apple-system, BlinkMacSystemFont, 'Segoe UI', "
          "Helvetica, Arial, sans-serif")
 
-
-# ── Section ordering ──────────────────────────────────────────────────────────
-SECTION_ORDER = [
-    "General Oncology",
-    "Breast Oncology",
-    "CNS Oncology",
-    "Gastrointestinal Oncology",
-    "Gynaecological Oncology",
-    "Haematological Oncology",
-    "Head & Neck Oncology",
-    "Melanoma & Skin Oncology",
-    "Radiation Oncology",
-    "Thoracic Oncology",
-    "Urological Oncology",
-    "Methodological Issues",
-]
 
 FULL_BLOCK_TYPES = {"Phase III", "Phase II", "Phase I", "Phase I/II",
                     "Guideline", "Systematic review",
@@ -197,37 +180,37 @@ def _section_block(section_name: str,
     <tr><td style="height:12px;"></td></tr>"""
 
 
-# ── Static journal list (derived from the PubMed RSS search string) ───────────
-# Alphabetical order; kept as abbreviations matching PubMed shorthand.
-_RSS_JOURNALS = (
-    "<em>Ann Intern Med</em>, <em>Ann Oncol</em>, <em>BMJ</em>, "
-    "<em>CA Cancer J Clin</em>, <em>J Clin Oncol</em>, "
-    "<em>J Natl Compr Canc Netw</em>, <em>JAMA</em>, "
-    "<em>JAMA Intern Med</em>, <em>JAMA Netw Open</em>, <em>JAMA Oncol</em>, "
-    "<em>Lancet</em>, <em>Lancet Oncol</em>, <em>N Engl J Med</em>, "
-    "<em>Nat Med</em>, <em>Nat Rev Clin Oncol</em>, <em>PLoS Med</em>"
-)
-
-
 # ── Public interface ──────────────────────────────────────────────────────────
 
-def render_html(extracted: list[dict], minor_interest: list[dict],
-                title: str, days: int = 7) -> str:
+def render_html(
+    extracted: list[dict],
+    minor_interest: list[dict],
+    title: str,
+    days: int = 7,
+    sections: list[str] | None = None,
+    rss_journals_html: str = "",
+) -> str:
     """
     Render the full HTML email from extracted records and minor-interest articles.
 
     Args:
-        extracted:       Structured dicts from summarize.extract_structured_data()
-                         (major-interest articles, shown with full summaries).
-        minor_interest:  Raw article dicts for minor-interest articles, shown as
-                         plain title / journal / PMID one-liners.
-        title:           Email / digest title string (from config.DIGEST_TITLE).
-        days:            Date window used for the PubMed search (default 7).
-                         Used to compute and display the covered date range.
+        extracted:         Structured dicts from summarize.extract_structured_data()
+                           (major-interest articles, shown with full summaries).
+        minor_interest:    Raw article dicts for minor-interest articles, shown as
+                           plain title / journal / PMID one-liners.
+        title:             Email / digest title string.
+        days:              Date window used for the PubMed search (default 7).
+                           Used to compute and display the covered date range.
+        sections:          Ordered list of section names from the digest config.
+                           The first entry is the fallback for unclassifiable articles.
+        rss_journals_html: HTML string listing the journals covered, shown in footer.
 
     Returns:
         Complete HTML string ready to send as an email.
     """
+    sections = sections or []
+    fallback_section = sections[0] if sections else ""
+
     today_dt  = datetime.now()
     from_dt   = today_dt - timedelta(days=days)
     today_str = today_dt.strftime("%B %d, %Y")
@@ -245,24 +228,24 @@ def render_html(extracted: list[dict], minor_interest: list[dict],
         )
 
     # Group major-interest extracted records by section
-    by_section: dict[str, list] = {s: [] for s in SECTION_ORDER}
+    by_section: dict[str, list] = {s: [] for s in sections}
     for rec in extracted:
-        sec = rec.get("section", "General Oncology")
+        sec = rec.get("section", fallback_section)
         if sec not in by_section:
-            sec = "General Oncology"
+            sec = fallback_section
         by_section[sec].append(rec)
 
     # Group minor-interest raw article dicts by section (assigned by classifier)
-    minor_by_section: dict[str, list] = {s: [] for s in SECTION_ORDER}
+    minor_by_section: dict[str, list] = {s: [] for s in sections}
     for a in minor_interest:
-        sec = a.get("section", "General Oncology")
+        sec = a.get("section", fallback_section)
         if sec not in minor_by_section:
-            sec = "General Oncology"
+            sec = fallback_section
         minor_by_section[sec].append(a)
 
     sections_html = ""
     article_count = len(extracted) + len(minor_interest)
-    for section_name in SECTION_ORDER:
+    for section_name in sections:
         major_recs = by_section[section_name]
         minor_recs = minor_by_section[section_name]
         if major_recs or minor_recs:
@@ -315,7 +298,7 @@ def render_html(extracted: list[dict], minor_interest: list[dict],
         </p>
         <p style="margin:0 0 4px 0;font-size:11px;color:{MUTED};
                   line-height:1.7;font-family:{SANS};">
-          Articles sourced from {_RSS_JOURNALS}.
+          Articles sourced from {rss_journals_html}.
         </p>
         <p style="margin:0 0 4px 0;font-size:11px;color:{MUTED};
                   font-style:italic;font-family:{SANS};">

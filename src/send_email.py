@@ -6,10 +6,12 @@ Setup (one-time):
   2. Security → App passwords → create one for "Mail"
   3. Store the 16-char password as SMTP_PASSWORD in your env / GitHub secret
 
-The module supports sending to multiple recipients (comma-separated in
-RECIPIENT_EMAILS env var).
+Recipients are looked up at send time from an environment variable whose name
+is passed in as recipient_env_var (e.g. "RECIPIENT_EMAILS"). The value of that
+env var should be a comma-separated list of email addresses.
 """
 
+import os
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -17,23 +19,35 @@ from email.mime.text import MIMEText
 import config
 
 
-def send_digest(html: str, subject: str) -> None:
+def send_digest(
+    html: str,
+    subject: str,
+    recipient_env_var: str = "RECIPIENT_EMAILS",
+) -> None:
     """
-    Send the HTML digest to all configured recipients.
+    Send the HTML digest to all recipients listed in the given env var.
 
     Args:
-        html:    Full HTML email body
-        subject: Email subject line
+        html:              Full HTML email body
+        subject:           Email subject line
+        recipient_env_var: Name of the env var / GitHub secret that holds the
+                           comma-separated list of recipient email addresses.
+                           Defaults to "RECIPIENT_EMAILS" for backward compat.
     """
-    if not config.RECIPIENT_EMAILS:
-        raise ValueError("RECIPIENT_EMAILS is not configured.")
+    recipients_raw = os.getenv(recipient_env_var, "")
+    recipients = [e.strip() for e in recipients_raw.split(",") if e.strip()]
+    if not recipients:
+        raise ValueError(
+            f"No recipients found in env var '{recipient_env_var}'. "
+            "Set it to a comma-separated list of email addresses."
+        )
     if not config.SMTP_USER or not config.SMTP_PASSWORD:
         raise ValueError("SMTP_USER and SMTP_PASSWORD must be set.")
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"]    = config.SENDER_EMAIL or config.SMTP_USER
-    msg["To"]      = ", ".join(config.RECIPIENT_EMAILS)
+    msg["To"]      = ", ".join(recipients)
 
     # Plain-text fallback (stripped-down version)
     plain = _html_to_plain(html)
@@ -46,11 +60,11 @@ def send_digest(html: str, subject: str) -> None:
         server.login(config.SMTP_USER, config.SMTP_PASSWORD)
         server.sendmail(
             from_addr=config.SENDER_EMAIL or config.SMTP_USER,
-            to_addrs=config.RECIPIENT_EMAILS,
+            to_addrs=recipients,
             msg=msg.as_string(),
         )
 
-    print(f"  Email sent to: {', '.join(config.RECIPIENT_EMAILS)}")
+    print(f"  Email sent to: {', '.join(recipients)}")
 
 
 def _html_to_plain(html: str) -> str:

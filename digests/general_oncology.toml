@@ -1,0 +1,141 @@
+# ══════════════════════════════════════════════════════════════════════════════
+#  Weekly Oncology Research Digest — configuration
+#
+#  This file controls everything that is unique to this digest:
+#    • Which PubMed RSS feeds to pull from
+#    • Which articles to include (the classification rubric)
+#    • Which sections appear in the email and in which order
+#    • How detailed the AI-generated summaries should be
+#    • Who receives the email
+#
+#  All other code (email design, sending logic, etc.) is shared across all
+#  digests, so changes to the shared code affect every digest automatically.
+#
+#  You can edit this file directly in the GitHub web interface
+#  (click the pencil icon) — no local setup required.
+# ══════════════════════════════════════════════════════════════════════════════
+
+
+# ── Identity ──────────────────────────────────────────────────────────────────
+
+[digest]
+id    = "general_oncology"
+title = "Weekly Oncology Research Digest"
+
+# Name of the GitHub secret that holds the recipient email addresses.
+# The secret value should be a comma-separated list of email addresses,
+# e.g.  name@example.com, other@example.com
+# Go to: GitHub → Settings → Secrets and variables → Actions → New repository secret
+recipient_env_var = "RECIPIENT_EMAILS"
+
+
+# ── RSS feeds ─────────────────────────────────────────────────────────────────
+#
+# How to get a PubMed RSS URL:
+#   1. Go to https://pubmed.ncbi.nlm.nih.gov/ and run your search
+#   2. Click "Create RSS" below the result count
+#   3. Set "Number of items" to 100, click "Create RSS", copy the URL
+#
+# You can add multiple URLs (one per line). Duplicate articles are removed
+# automatically, so overlapping searches are fine.
+
+[feeds]
+rss_urls = [
+    # Current search: [describe your PubMed search here]
+    # Generated: [add the date you created this feed]
+    "https://pubmed.ncbi.nlm.nih.gov/rss/search/1BKD3NT7c-BK2PVxO2hDbLLkJpO6NsOch9fmY_Gw_1wlyz_1TS/?limit=100",
+
+    # Add additional feeds below (one per line):
+    # "https://pubmed.ncbi.nlm.nih.gov/rss/search/<your-second-feed-id>/?limit=100",
+]
+
+
+# ── Sections ──────────────────────────────────────────────────────────────────
+#
+# The ordered list of sections that appear in the email.
+# • The order here controls the order in the email.
+# • The first entry is the fallback for articles that span multiple tumour types
+#   or cannot be clearly assigned to one section.
+# • Section names must match exactly what the AI uses — the list below is
+#   injected directly into the AI prompt.
+
+[sections]
+order = [
+    "General Oncology",
+    "Breast Oncology",
+    "CNS Oncology",
+    "Gastrointestinal Oncology",
+    "Gynaecological Oncology",
+    "Haematological Oncology",
+    "Head & Neck Oncology",
+    "Melanoma & Skin Oncology",
+    "Radiation Oncology",
+    "Thoracic Oncology",
+    "Urological Oncology",
+    "Methodological Issues",
+]
+
+
+# ── AI prompts ────────────────────────────────────────────────────────────────
+
+[prompts]
+
+# Maximum number of words for the plain-language summary in major-interest
+# articles. Increase this to get longer, more detailed summaries.
+summary_max_words = 20
+
+# HTML for the journal list shown in the email footer.
+# Update this to match the journals covered by your RSS feeds.
+# HTML tags like <em>...</em> are supported.
+rss_journals_html = """
+<em>Ann Intern Med</em>, <em>Ann Oncol</em>, <em>BMJ</em>,
+<em>CA Cancer J Clin</em>, <em>J Clin Oncol</em>,
+<em>J Natl Compr Canc Netw</em>, <em>JAMA</em>,
+<em>JAMA Intern Med</em>, <em>JAMA Netw Open</em>, <em>JAMA Oncol</em>,
+<em>Lancet</em>, <em>Lancet Oncol</em>, <em>N Engl J Med</em>,
+<em>Nat Med</em>, <em>Nat Rev Clin Oncol</em>, <em>PLoS Med</em>
+"""
+
+# ── Classification rubric ─────────────────────────────────────────────────────
+#
+# This text is injected verbatim into the AI classification prompt.
+# Edit the bullet points to change which articles are included and how they
+# are categorised. The three headings (MAJOR INTEREST, MINOR INTEREST,
+# EXCLUDED) must be kept — the AI depends on them.
+#
+# MAJOR INTEREST  → shown with full AI-generated summary
+# MINOR INTEREST  → shown as title / journal / PMID only
+# EXCLUDED        → omitted from the digest entirely
+
+classify_criteria = """
+MAJOR INTEREST — core evidence, shown with full summaries:
+- All articles published in The Lancet, JAMA, NEJM, or BMJ (regardless of study type)
+- All randomized controlled trials (any phase)
+- Meta-analyses that are based on RCT data
+- Official clinical guidelines from ESMO, ASCO, ESTRO, ASTRO, NCCN, or MASCC
+- Meta-scientific articles: discussions of trial methodology, surrogate endpoints,
+  statistical techniques, or regulatory issues (FDA/EMA)
+
+MINOR INTEREST — worth noting, shown title/journal/PMID only:
+- Non-randomized clinical trials (Phase I single-arm, Phase II single-arm)
+- All meta-analyses and systematic reviews NOT based on RCT data
+- All articles reporting on RCT data (secondary analyses, post-hoc analyses)
+  not already captured as major_interest
+- High-quality observational studies published in Lancet Oncology, JAMA Oncology,
+  Annals of Oncology, or Journal of Clinical Oncology
+- Clinical practice guidelines NOT from the named societies above
+- Literature reviews
+- Diagnostic studies
+- Studies on cancer treatment side effects and toxicity
+- Epidemiology studies that are European or global in scope
+
+EXCLUDED — omit entirely:
+- Missing or absent abstract (absolute exclusion)
+- Pure editorials, viewpoints, opinion pieces, or narrative essays with no data
+- Case reports or case series
+- Health policy or health economics studies that are obviously only relevant to the
+  US healthcare system (e.g. Medicaid, US insurance)
+- Non-oncology articles
+- Preclinical / basic science (unless explicitly translational with clinical relevance)
+- Patient education pages
+"""
