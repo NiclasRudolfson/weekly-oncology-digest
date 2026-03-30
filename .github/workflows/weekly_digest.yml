@@ -143,8 +143,8 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add seen_pmids_${{ matrix.digest_id }}.txt
           git diff --staged --quiet || (
-            git pull --rebase origin ${{ github.ref_name }} &&
             git commit -m "chore: update seen_pmids (${{ matrix.digest_id }}) [skip ci]" &&
+            git pull --rebase origin ${{ github.ref_name }} &&
             git push
           )
 
