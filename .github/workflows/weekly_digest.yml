@@ -53,7 +53,7 @@ jobs:
   send-digest:
     name: "Digest: ${{ matrix.digest_id }}"
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 45
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
@@ -106,6 +106,26 @@ jobs:
 
       - name: Run digest
         if: steps.should_run.outputs.result == 'true'
+        uses: nick-fields/retry@v3
+        with:
+          timeout_minutes: 14
+          max_attempts: 3
+          retry_wait_seconds: 60
+          command: |
+            DRY="${{ github.event.inputs.dry_run || 'false' }}"
+            RSS="${{ github.event.inputs.rss_url || '' }}"
+
+            ARGS="--digest ${{ matrix.digest_id }} --save-html digest_preview_${{ matrix.digest_id }}.html"
+
+            if [ -n "$RSS" ]; then
+              ARGS="$ARGS --rss-url $RSS"
+            fi
+
+            if [ "$DRY" = "true" ]; then
+              ARGS="$ARGS --dry-run"
+            fi
+
+            python main.py $ARGS
         env:
           GEMINI_API_KEY:   ${{ secrets.GEMINI_API_KEY }}
           PUBMED_API_KEY:   ${{ secrets.PUBMED_API_KEY }}
@@ -115,21 +135,6 @@ jobs:
           # Inject the digest-specific recipient secret under its configured name.
           # The digest config file specifies which env var name to look up.
           ${{ matrix.recipient_secret }}: ${{ secrets[matrix.recipient_secret] }}
-        run: |
-          DRY="${{ github.event.inputs.dry_run || 'false' }}"
-          RSS="${{ github.event.inputs.rss_url || '' }}"
-
-          ARGS="--digest ${{ matrix.digest_id }} --save-html digest_preview_${{ matrix.digest_id }}.html"
-
-          if [ -n "$RSS" ]; then
-            ARGS="$ARGS --rss-url $RSS"
-          fi
-
-          if [ "$DRY" = "true" ]; then
-            ARGS="$ARGS --dry-run"
-          fi
-
-          python main.py $ARGS
 
       - name: Commit updated seen_pmids
         if: steps.should_run.outputs.result == 'true' && github.event.inputs.dry_run != 'true'

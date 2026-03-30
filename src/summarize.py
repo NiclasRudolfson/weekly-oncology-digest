@@ -19,9 +19,11 @@ section list, and summary length all come from the per-digest TOML configuration
 
 import json
 import re
+import time
 from typing import Any, TYPE_CHECKING
 
 from google import genai
+from google.genai import errors as genai_errors
 
 import config
 
@@ -30,6 +32,21 @@ if TYPE_CHECKING:
 
 
 client = genai.Client(api_key=config.GEMINI_API_KEY)
+
+
+# ── Retry helper ──────────────────────────────────────────────────────────────
+
+def _generate_with_retry(model: str, contents: str, max_attempts: int = 3, initial_wait: int = 60) -> Any:
+    """Call generate_content with exponential backoff on transient server errors."""
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return client.models.generate_content(model=model, contents=contents)
+        except genai_errors.ServerError as e:
+            if attempt == max_attempts:
+                raise
+            wait = initial_wait * (2 ** (attempt - 1))  # 60s, 120s, ...
+            print(f"  Gemini API error (attempt {attempt}/{max_attempts}): {e}. Retrying in {wait}s...")
+            time.sleep(wait)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -94,10 +111,7 @@ def classify_articles(articles: list[dict], cfg: "DigestConfig") -> list[dict]:
         articles=items,
     )
 
-    response = client.models.generate_content(
-        model=config.CLASSIFY_MODEL,
-        contents=prompt,
-    )
+    response = _generate_with_retry(model=config.CLASSIFY_MODEL, contents=prompt)
 
     results = _extract_json(response.text)
     for r in results:
@@ -227,10 +241,7 @@ def extract_structured_data(included: list[dict], cfg: "DigestConfig") -> list[d
         articles=items,
     )
 
-    response = client.models.generate_content(
-        model=config.EXTRACT_MODEL,
-        contents=prompt,
-    )
+    response = _generate_with_retry(model=config.EXTRACT_MODEL, contents=prompt)
 
     text = response.text.replace("```json", "").replace("```", "").strip()
     # Find the first '[' to handle any leading prose the model may add
